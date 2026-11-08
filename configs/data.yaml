@@ -1,0 +1,31 @@
+# Phase 1 data configuration. Paths are for Colab with Drive mounted.
+# Fill the pins below during Phase 1 *before* running the integrity job;
+# the job refuses to run while any required pin is null.
+
+spider_root: /content/drive/MyDrive/text-to-sql/data/spider   # contains *.json and database/
+output_dir: /content/drive/MyDrive/text-to-sql/artifacts/phase1
+
+bundle:
+  url: null          # Spider database bundle source URL
+  sha256: null       # checksum of the downloaded archive
+
+hf_dataset:
+  name: xlangai/spider
+  revision: null     # commit hash; used to cross-check questions/SQL against the bundle JSON
+
+train_files: [train_spider.json]   # matches the 7,000-example HF train split
+test_files: [dev.json]             # Spider validation = our test split, run once in Phase 4
+
+split_seed: 20261108
+dev_db_fraction: 0.1
+dev_subset_size: 300
+dev_subset_seed: 20261109
+
+adjudications: configs/adjudications.yaml   # frozen manual decisions for needs_adjudication cases
+
+limits:
+  wall_seconds: 30
+  memory_bytes: 536870912
+  max_rows: 100000
+  max_output_bytes: 16777216
+  max_cell_bytes: 1048576
