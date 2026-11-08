@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: pytest (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # ubuntu: same OS family as Colab, where the sandbox's RLIMIT_AS cap is active
+        # macos: the local development machine
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      # Python version comes from .python-version; --frozen fails if uv.lock is stale
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Run tests
+        run: uv run pytest -q
+
+      # PLAN.md: Mac-side code must work without ML libraries installed
+      - name: Check ML libraries are absent
+        run: |
+          uv run python - <<'EOF'
+          import importlib.util, sys
+          present = [m for m in ("torch", "transformers", "peft", "bitsandbytes") if importlib.util.find_spec(m)]
+          sys.exit(f"ML libraries must not be Mac dependencies: {present}" if present else 0)
+          EOF
