@@ -8,3 +8,22 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Data, models, secrets — never committed
+data/
+artifacts/
+*.sqlite
+*.sqlite3
+*.db
+*.safetensors
+*.bin
+*.pt
+*.ckpt
+checkpoints/
+.env
+*.token
+.pytest_cache/
+
+# Local loop state
+ralph/progress.md
+ralph/reviews/
