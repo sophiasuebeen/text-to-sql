@@ -1,5 +1,4 @@
 import json
-import re
 
 import pytest
 
@@ -18,6 +17,8 @@ from text_to_sql.data import (
     select_dev_subset,
     split_databases,
 )
+
+from fakes import FakeTokenizer
 
 
 def rows(dbs_counts, prefix):
@@ -83,35 +84,6 @@ def test_database_manifest(tmp_path, make_db):
     assert list(m) == ["a", "b"] and len(m["a"]["sha256"]) == 64
     with pytest.raises(FileNotFoundError):
         build_database_manifest(tmp_path / "database", ["a", "zzz"])
-
-
-class FakeTokenizer:
-    """Word-ish tokenizer with ChatML-like template; exercises orchestration only."""
-
-    eos_token = "<|im_end|>"
-    eos_token_id = 2
-    pad_token_id = 2
-
-    def __init__(self, render_eos=True):
-        self.render_eos = render_eos
-        self.vocab = {"<|im_end|>": 2}
-
-    def apply_chat_template(self, messages, tokenize=False, add_generation_prompt=False):
-        s = ""
-        for m in messages:
-            end = self.eos_token if self.render_eos else "<|end|>"
-            s += f"<|im_start|>{m['role']}\n{m['content']}{end}\n"
-        if add_generation_prompt:
-            s += "<|im_start|>assistant\n"
-        return s
-
-    def __call__(self, text, add_special_tokens=False, return_offsets_mapping=False):
-        ids, offsets = [], []
-        for m in re.finditer(r"<\|[a-z_]+\|>|\w+|[^\w\s]|\s+", text):
-            tok = m.group()
-            ids.append(self.vocab.setdefault(tok, len(self.vocab) + 10))
-            offsets.append((m.start(), m.end()))
-        return {"input_ids": ids, "offset_mapping": offsets}
 
 
 def test_supervised_example_masks_prompt_and_keeps_eos():

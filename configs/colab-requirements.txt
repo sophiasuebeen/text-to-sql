@@ -1,0 +1,8 @@
+# GPU dependencies for Colab (never installed on the Mac or in CI).
+# Install these, then on the first successful run replace this file with exact
+# pins from `pip freeze | grep -iE "^(torch|transformers|peft|bitsandbytes|accelerate)=="`
+# and commit it. train.py also records the versions it actually ran with.
+transformers
+peft
+bitsandbytes
+accelerate
