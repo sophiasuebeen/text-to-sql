@@ -27,3 +27,7 @@ checkpoints/
 # Local loop state
 ralph/progress.md
 ralph/reviews/
+
+# Private planning notes (kept locally, not published)
+PLAN.md
+LOOP_PLAN.md
