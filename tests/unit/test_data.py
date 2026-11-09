@@ -2,18 +2,20 @@ import json
 
 import pytest
 
-from text_to_sql.data import (
+from text_to_sql.data.prepare import (
     IGNORE_INDEX,
-    Example,
-    SplitError,
     TemplateContractError,
-    assign_splits,
-    build_database_manifest,
     build_supervised_example,
-    check_disjoint,
-    load_spider_file,
     pad_batch,
     prompt_fits,
+)
+from text_to_sql.data.splits import (
+    Example,
+    SplitError,
+    assign_splits,
+    build_database_manifest,
+    check_disjoint,
+    load_spider_file,
     select_dev_subset,
     split_databases,
 )

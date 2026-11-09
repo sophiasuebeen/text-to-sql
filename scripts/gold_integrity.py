@@ -27,15 +27,8 @@ from pathlib import Path
 import yaml
 
 from text_to_sql import EVALUATOR_VERSION
-from text_to_sql.data import (
-    assign_splits,
-    build_database_manifest,
-    db_path,
-    load_spider_file,
-    select_dev_subset,
-    write_jsonl,
-)
-from text_to_sql.evaluate import (
+from text_to_sql.data.splits import assign_splits, build_database_manifest, db_path, load_spider_file, select_dev_subset
+from text_to_sql.evaluation.gold import (
     AUDIT_METHOD,
     NEEDS_ADJUDICATION,
     SELF_COMPARE_FAILED,
@@ -44,7 +37,8 @@ from text_to_sql.evaluate import (
     audit_gold,
     gold_cache_key,
 )
-from text_to_sql.sandbox import Limits
+from text_to_sql.io import write_jsonl
+from text_to_sql.sql.executor import Limits
 
 REQUIRED_PINS = [("bundle", "url"), ("bundle", "sha256"), ("hf_dataset", "revision")]
 

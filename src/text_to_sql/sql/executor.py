@@ -7,8 +7,7 @@ Layers, from outermost in:
 3. SQLite ``hard_heap_limit`` (process-wide heap cap) and ``SQLITE_LIMIT_LENGTH``
    (max size of any single string/blob, i.e. the per-cell bound); best-effort
    ``RLIMIT_AS`` on Linux (macOS does not enforce it).
-4. Authorizer allowlist: READ, SELECT, RECURSIVE and approved FUNCTIONs only.
-   Everything else (writes, ATTACH/DETACH, PRAGMA, transactions, ...) is denied.
+4. The authorizer allowlist from ``policy.py`` (reads and approved functions only).
 5. Progress handler aborting the statement after the internal deadline.
 6. Incremental ``fetchmany`` with row-count and serialized-byte budgets.
 
@@ -26,7 +25,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .compare import CanonicalRow, UnsupportedValue, canonicalize_row
+from ..evaluation.compare import CanonicalRow, UnsupportedValue, canonicalize_row
+from .policy import authorizer
 
 # Structured outcome statuses
 OK = "ok"
@@ -36,32 +36,6 @@ TIMEOUT = "timeout"
 RESOURCE_LIMIT = "resource_limit"
 UNSUPPORTED_VALUE = "unsupported_value"
 WORKER_ERROR = "worker_error"
-
-APPROVED_FUNCTIONS = frozenset(
-    {
-        # aggregates
-        "avg", "count", "group_concat", "max", "min", "sum", "total", "string_agg",
-        # scalar
-        "abs", "char", "coalesce", "format", "glob", "hex", "ifnull", "iif", "instr",
-        "length", "like", "likelihood", "likely", "lower", "ltrim", "nullif", "octet_length",
-        "printf", "quote", "replace", "round", "rtrim", "sign", "substr", "substring",
-        "trim", "typeof", "unicode", "unlikely", "upper", "concat", "concat_ws",
-        # date/time
-        "date", "datetime", "julianday", "strftime", "time", "unixepoch", "timediff",
-        # math
-        "acos", "asin", "atan", "atan2", "ceil", "ceiling", "cos", "exp", "floor", "ln",
-        "log", "log10", "log2", "mod", "pi", "pow", "power", "sin", "sqrt", "tan", "trunc",
-        # window
-        "row_number", "rank", "dense_rank", "percent_rank", "cume_dist", "ntile",
-        "lag", "lead", "first_value", "last_value", "nth_value",
-    }
-)
-# Deliberately absent: random/randomblob (nondeterministic), load_extension,
-# sqlite_* introspection, changes/last_insert_rowid, zeroblob (memory amplifier).
-
-_SQLITE_RECURSIVE = getattr(sqlite3, "SQLITE_RECURSIVE", 33)
-_ALLOWED_ACTIONS = {sqlite3.SQLITE_READ, sqlite3.SQLITE_SELECT, _SQLITE_RECURSIVE}
-
 
 @dataclass(frozen=True)
 class Limits:
@@ -99,14 +73,6 @@ class ExecOutcome:
             status=d["status"], ncols=d.get("ncols"), rows=rows, error=d.get("error"),
             elapsed_s=d.get("elapsed_s", 0.0), extra=d.get("extra", {}),
         )
-
-
-def _authorizer(action: int, arg1: Any, arg2: Any, _db: Any, _src: Any) -> int:
-    if action in _ALLOWED_ACTIONS:
-        return sqlite3.SQLITE_OK
-    if action == sqlite3.SQLITE_FUNCTION and isinstance(arg2, str) and arg2.lower() in APPROVED_FUNCTIONS:
-        return sqlite3.SQLITE_OK
-    return sqlite3.SQLITE_DENY
 
 
 def _value_bytes(v: Any) -> int:
@@ -169,7 +135,7 @@ def _run_in_worker(db_path: str, sql: str, limits: Limits) -> tuple:
             return 0
 
         conn.set_progress_handler(progress, limits.progress_opcodes)
-        conn.set_authorizer(_authorizer)
+        conn.set_authorizer(authorizer)
 
         try:
             cur = conn.execute(sql)

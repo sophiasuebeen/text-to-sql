@@ -1,4 +1,4 @@
-"""Checkpoint durability on Google Drive (PLAN.md "Checkpoint contract").
+"""Checkpoint durability on Google Drive (see docs/model-card.md).
 
 Life of a checkpoint:
 1. Trainer writes it locally (fast disk).

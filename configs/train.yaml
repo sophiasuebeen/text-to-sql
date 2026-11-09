@@ -1,4 +1,4 @@
-# QLoRA training configuration (PLAN.md Phase 3 starting values).
+# QLoRA training configuration (starting values; see docs/model-card.md).
 # Change hyperparameters only on dev evidence; at most 3 configurations total,
 # each with its own run_name, logged in the results table.
 
@@ -41,7 +41,7 @@ output:
   local_dir: /content/runs                                   # fast Colab disk
   drive_dir: /content/drive/MyDrive/text-to-sql/runs         # durable copies
 
-# --smoke overrides (PLAN.md Phase 2)
+# --smoke overrides (short run to validate the pipeline)
 smoke:
   max_train_examples: 200
   training:

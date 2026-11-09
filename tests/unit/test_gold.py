@@ -1,16 +1,16 @@
 import pytest
 
-import text_to_sql.evaluate as ev
-from text_to_sql.evaluate import (
+import text_to_sql.evaluation.gold as ev
+from text_to_sql.evaluation.gold import (
     AMBIGUOUS_ORDER,
     GOLD_PARSE_ERROR,
     NEEDS_ADJUDICATION,
     UNORDERED_LIMIT,
     GoldCache,
     audit_gold,
-    score_prediction,
-    sha256_file,
 )
+from text_to_sql.evaluation.score import score_prediction
+from text_to_sql.io import sha256_file
 
 
 @pytest.mark.parametrize(

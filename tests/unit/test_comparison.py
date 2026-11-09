@@ -2,7 +2,7 @@
 
 import pytest
 
-from text_to_sql.compare import (
+from text_to_sql.evaluation.compare import (
     UnsupportedValue,
     canonicalize_number,
     canonicalize_row,
