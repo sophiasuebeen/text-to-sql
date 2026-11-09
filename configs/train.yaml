@@ -1,0 +1,50 @@
+# QLoRA training configuration (PLAN.md Phase 3 starting values).
+# Change hyperparameters only on dev evidence; at most 3 configurations total,
+# each with its own run_name, logged in the results table.
+
+run_name: qlora-r16-lr2e-4
+seed: 42
+
+model:
+  name: Qwen/Qwen2.5-Coder-1.5B-Instruct
+  revision: null          # pin to a Hugging Face commit hash before any real run
+
+data:
+  phase1_dir: /content/drive/MyDrive/text-to-sql/artifacts/phase1   # output of scripts/gold_integrity.py
+  spider_root: /content/drive/MyDrive/text-to-sql/data/spider
+  max_train_examples: null
+
+context:
+  max_length: 2048        # set from train/dev token lengths in Phase 1, never from test
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules: [q_proj, k_proj, v_proj, o_proj]
+
+training:
+  learning_rate: 2.0e-4
+  lr_scheduler_type: cosine
+  warmup_ratio: 0.03
+  per_device_train_batch_size: 4     # OOM fallback: 4 -> 2 -> 1 ...
+  gradient_accumulation_steps: 4     # ... with 4 -> 8 -> 16 to keep effective batch 16
+  num_train_epochs: 3
+  max_steps: -1
+  gradient_checkpointing: true
+  optim: paged_adamw_8bit
+  logging_steps: 10
+  save_steps: 100
+  keep_resume_checkpoints: 2
+
+output:
+  local_dir: /content/runs                                   # fast Colab disk
+  drive_dir: /content/drive/MyDrive/text-to-sql/runs         # durable copies
+
+# --smoke overrides (PLAN.md Phase 2)
+smoke:
+  max_train_examples: 200
+  training:
+    num_train_epochs: 3
+    save_steps: 10
+    logging_steps: 1
