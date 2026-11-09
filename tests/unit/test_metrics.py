@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from text_to_sql.metrics import (
+from text_to_sql.evaluation.metrics import (
     accuracy,
     grouped_accuracy,
     macro_accuracy,

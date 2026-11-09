@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from text_to_sql.sandbox import Limits
+from text_to_sql.sql.executor import Limits
 
 
 @pytest.fixture

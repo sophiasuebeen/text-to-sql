@@ -1,4 +1,4 @@
-"""Gold integrity audit, gold-outcome cache and per-prediction scoring.
+"""Gold integrity audit and gold-outcome cache.
 
 Gold ordering audit (frozen policy, AUDIT_METHOD below):
 - Top-level ORDER BY (detected by sqlglot in the SQLite dialect) => sequence
@@ -29,10 +29,10 @@ from typing import Any
 
 from sqlglot import exp
 
-from . import EVALUATOR_VERSION
+from .. import EVALUATOR_VERSION
+from ..sql.executor import OK, ExecOutcome, Limits, execute_sql
+from ..sql.policy import parse_single_read
 from .compare import rows_match
-from .extract import parse_single_read
-from .sandbox import OK, ExecOutcome, Limits, execute_sql
 
 AUDIT_METHOD = "projected_order_keys+limit_removal/v1"
 
@@ -213,14 +213,6 @@ def audit_gold(db_path: str | Path, sql: str, limits: Limits = Limits()) -> Gold
     return GoldRecord(True, info.ordered, None, out)
 
 
-def sha256_file(path: str | Path, chunk: int = 1 << 20) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        while block := f.read(chunk):
-            h.update(block)
-    return h.hexdigest()
-
-
 def gold_cache_key(db_sha256: str, sql: str, limits: Limits) -> str:
     ident = [db_sha256, sql, sqlite3.sqlite_version, EVALUATOR_VERSION, AUDIT_METHOD, asdict(limits)]
     return hashlib.sha256(json.dumps(ident, sort_keys=True).encode()).hexdigest()
@@ -254,31 +246,3 @@ class GoldCache:
             rec = audit_gold(db_path, sql, limits)
             self.put(key, rec)
         return rec
-
-
-@dataclass(frozen=True)
-class Score:
-    correct: bool
-    executed: bool
-    pred_status: str
-    error: str | None = None
-
-
-def score_prediction(db_path: str | Path, pred_sql: str | None, gold: GoldRecord, limits: Limits = Limits()) -> Score:
-    """Score one already-extracted prediction against an eligible gold record.
-
-    ``pred_sql=None`` means extraction failed or the prompt overflowed: a failure
-    that stays in the denominator.
-    """
-    if not gold.eligible:
-        raise ValueError("ineligible gold examples are excluded before scoring")
-    if pred_sql is None:
-        return Score(False, False, "no_sql")
-    tree, err = parse_single_read(pred_sql)
-    if err:
-        return Score(False, False, "parse_error", err)
-    out = execute_sql(db_path, pred_sql, limits)
-    if out.status != OK:
-        return Score(False, False, out.status, out.error)
-    g = gold.outcome
-    return Score(rows_match(out.rows, out.ncols, g.rows, g.ncols, ordered=gold.ordered), True, OK)

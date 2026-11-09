@@ -1,6 +1,6 @@
 import pytest
 
-from text_to_sql.extract import extract_sql
+from text_to_sql.sql.policy import extract_sql
 
 
 @pytest.mark.parametrize(

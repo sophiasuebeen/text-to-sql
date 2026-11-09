@@ -6,7 +6,7 @@ import math
 import random
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Hashable, Iterable, Mapping, Sequence
+from typing import Hashable, Sequence
 
 
 def accuracy(flags: Sequence[bool]) -> float:

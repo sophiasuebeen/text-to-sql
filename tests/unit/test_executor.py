@@ -2,7 +2,7 @@ import multiprocessing as mp
 
 import pytest
 
-from text_to_sql.sandbox import (
+from text_to_sql.sql.executor import (
     DISALLOWED,
     OK,
     RESOURCE_LIMIT,

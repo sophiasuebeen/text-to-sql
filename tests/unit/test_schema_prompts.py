@@ -1,5 +1,5 @@
-from text_to_sql.prompts import SYSTEM_PROMPT, build_messages
-from text_to_sql.schema import quote_ident, serialize_schema
+from text_to_sql.model.prompts import SYSTEM_PROMPT, build_messages
+from text_to_sql.data.schema import quote_ident, serialize_schema
 
 
 def test_quote_ident_escapes_quotes():

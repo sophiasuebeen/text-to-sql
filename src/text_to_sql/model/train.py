@@ -1,7 +1,7 @@
-"""QLoRA fine-tuning (PLAN.md Phases 2-3). Runs in Colab on a GPU.
+"""QLoRA fine-tuning (smoke run, then full training). Runs in Colab on a GPU.
 
-    python -m text_to_sql.train --config configs/train.yaml            # full run
-    python -m text_to_sql.train --config configs/train.yaml --smoke    # ~200 examples
+    python -m text_to_sql.model.train --config configs/train.yaml            # full run
+    python -m text_to_sql.model.train --config configs/train.yaml --smoke    # ~200 examples
 
 Re-running the same command after a disconnect resumes from the newest complete,
 identity-compatible checkpoint on Drive (optimizer, scheduler, RNG, scaler and
@@ -34,7 +34,7 @@ from typing import Any
 
 import yaml
 
-from . import EVALUATOR_VERSION
+from .. import EVALUATOR_VERSION
 from .checkpoints import (
     complete_checkpoints,
     latest_complete_checkpoint,
@@ -42,9 +42,11 @@ from .checkpoints import (
     publish_checkpoint,
     write_manifest,
 )
-from .data import build_supervised_example, db_path, pad_batch, read_jsonl
+from ..data.prepare import build_supervised_example, pad_batch
+from ..io import read_jsonl
+from ..data.schema import SERIALIZER_VERSION, serialize_schema
+from ..data.splits import db_path
 from .prompts import PROMPT_VERSION
-from .schema import SERIALIZER_VERSION, serialize_schema
 
 # ---------------------------------------------------------------- config
 
@@ -137,7 +139,7 @@ def load_config(path: str | Path, *, smoke: bool = False, allow_unpinned: bool =
 
 def validate_config(cfg: TrainConfig, *, allow_unpinned: bool = False) -> None:
     if cfg.model_revision is None and not allow_unpinned:
-        raise ConfigError("model.revision must be pinned to a commit hash (PLAN.md reproducibility)")
+        raise ConfigError("model.revision must be pinned to a commit hash (reproducibility)")
     if cfg.training.effective_batch_size != 16:
         raise ConfigError(
             f"effective batch size is {cfg.training.effective_batch_size}, plan fixes 16; "

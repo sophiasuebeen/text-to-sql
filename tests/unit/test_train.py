@@ -9,7 +9,7 @@ import pytest
 import yaml
 
 from fakes import FakeTokenizer
-from text_to_sql.train import ConfigError, load_config, load_training_features, write_status
+from text_to_sql.model.train import ConfigError, load_config, load_training_features, write_status
 
 REPO = Path(__file__).resolve().parents[2]
 

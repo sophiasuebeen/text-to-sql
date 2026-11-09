@@ -37,7 +37,7 @@ jobs:
       - name: Run tests
         run: uv run pytest -q
 
-      # PLAN.md: Mac-side code must work without ML libraries installed
+      # Mac-side code must work without ML libraries installed (they are Colab-only)
       - name: Check ML libraries are absent
         run: |
           uv run python - <<'EOF'

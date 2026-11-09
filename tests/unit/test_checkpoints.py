@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from text_to_sql.checkpoints import (
+from text_to_sql.model.checkpoints import (
     MARKER,
     ChecksumMismatch,
     complete_checkpoints,

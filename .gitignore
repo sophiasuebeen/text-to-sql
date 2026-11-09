@@ -10,8 +10,8 @@ wheels/
 .venv
 
 # Data, models, secrets — never committed
-data/
-artifacts/
+/data/
+/artifacts/
 *.sqlite
 *.sqlite3
 *.db
@@ -19,7 +19,7 @@ artifacts/
 *.bin
 *.pt
 *.ckpt
-checkpoints/
+/checkpoints/
 .env
 *.token
 .pytest_cache/
