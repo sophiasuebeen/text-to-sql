@@ -10,7 +10,7 @@ model:
   revision: null          # pin to a Hugging Face commit hash before any real run
 
 data:
-  phase1_dir: /content/drive/MyDrive/text-to-sql/artifacts/phase1   # output of scripts/gold_integrity.py
+  phase1_dir: /content/drive/MyDrive/text-to-sql/artifacts/phase1   # output of scripts/validate_reference_queries.py
   spider_root: /content/drive/MyDrive/text-to-sql/data/spider
   max_train_examples: null
 

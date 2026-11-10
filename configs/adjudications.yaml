@@ -1,4 +1,4 @@
-# Manual integrity decisions for gold queries the automated audit marks
+# Manual integrity decisions for reference queries the automated audit marks
 # `needs_adjudication`. Data validity only; decide and commit BEFORE any model
 # score exists. Test-split entries must also be logged in docs/test-inspection-log.md.
 #

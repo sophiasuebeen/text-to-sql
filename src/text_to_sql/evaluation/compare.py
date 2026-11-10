@@ -10,7 +10,7 @@ compared and counted without ever sorting incompatible Python values:
 
 Comparison: column arity must match (even for empty results); columns compare by
 position (names ignored); unordered results compare as multisets (duplicates
-kept); ordered results (audited gold top-level ORDER BY) compare as sequences.
+kept); ordered results (audited reference top-level ORDER BY) compare as sequences.
 """
 
 from __future__ import annotations
@@ -69,13 +69,13 @@ def canonicalize_row(row: Sequence[Any]) -> CanonicalRow:
 def rows_match(
     pred_rows: Sequence[CanonicalRow],
     pred_ncols: int,
-    gold_rows: Sequence[CanonicalRow],
-    gold_ncols: int,
+    reference_rows: Sequence[CanonicalRow],
+    reference_ncols: int,
     *,
     ordered: bool,
 ) -> bool:
-    if pred_ncols != gold_ncols:
+    if pred_ncols != reference_ncols:
         return False
     if ordered:
-        return list(pred_rows) == list(gold_rows)
-    return Counter(pred_rows) == Counter(gold_rows)
+        return list(pred_rows) == list(reference_rows)
+    return Counter(pred_rows) == Counter(reference_rows)

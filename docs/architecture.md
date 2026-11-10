@@ -23,13 +23,13 @@ src/text_to_sql/
   sql/policy.py          what SQL is allowed: output extraction, parsing, runtime authorizer
   sql/executor.py        sandboxed execution in a resource-bounded worker process
   evaluation/compare.py  canonical values and result comparison
-  evaluation/gold.py     gold-query integrity audit and cache
-  evaluation/score.py    score one prediction against audited gold
+  evaluation/reference.py     reference-query integrity audit and cache
+  evaluation/score.py    score one prediction against audited reference
   evaluation/metrics.py  accuracy and the paired database-cluster bootstrap
   data/schema.py         SQLite file -> deterministic CREATE TABLE text
   data/splits.py         Spider loading, database-level splits, disjointness and manifests
   data/prepare.py        tokenization and label masking for training
-scripts/gold_integrity.py  builds manifests and audits every gold query
+scripts/validate_reference_queries.py  builds manifests and audits every reference query
 ```
 
 ## Path of one example
@@ -42,7 +42,7 @@ question ───────────────────────�
                                                                           │
 raw output ──sql/policy.extract_sql──▶ one SQL statement (or rejection)
            ──sql/executor.execute_sql──▶ canonical rows (or timeout/denied/error)
-           ──evaluation/score──▶ correct? vs audited gold ──evaluation/metrics──▶ report
+           ──evaluation/score──▶ correct? vs audited reference ──evaluation/metrics──▶ report
 ```
 
 ## Defense in depth for untrusted SQL

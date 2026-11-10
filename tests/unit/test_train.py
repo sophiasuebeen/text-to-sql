@@ -9,7 +9,7 @@ import pytest
 import yaml
 
 from fakes import FakeTokenizer
-from text_to_sql.model.train import ConfigError, load_config, load_training_features, write_status
+from text_to_sql.model.train import ConfigError, load_config, load_training_features, prepare_training_data, write_status
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -79,27 +79,68 @@ def phase1(tmp_path, people_db):
     out.mkdir()
     rows = [
         {"example_id": "train-00000", "split": "train", "db_id": "people", "question": "How many?", "query": "SELECT count(*) FROM people"},
-        {"example_id": "train-00001", "split": "train", "db_id": "people", "question": "Bad gold", "query": "SELECT nope FROM people"},
+        {"example_id": "train-00001", "split": "train", "db_id": "people", "question": "Bad reference", "query": "SELECT nope FROM people"},
         {"example_id": "train-00002", "split": "train", "db_id": "people", "question": "Names by age", "query": "SELECT name FROM people ORDER BY age"},
         {"example_id": "dev-00000", "split": "dev", "db_id": "people", "question": "Dev q", "query": "SELECT 1"},
         {"example_id": "test-00000", "split": "test", "db_id": "people"},
     ]
     (out / "examples.jsonl").write_text("\n".join(json.dumps(r) for r in rows))
     exclusions = [
-        {"example_id": "train-00001", "split": "train", "db_id": "people", "reason": "gold_sql_error"},
+        {"example_id": "train-00001", "split": "train", "db_id": "people", "reason": "reference_sql_error"},
         {"example_id": "train-00002", "split": "train", "db_id": "people", "reason": "ambiguous_order"},
     ]
     (out / "exclusions.jsonl").write_text("\n".join(json.dumps(r) for r in exclusions))
     return tmp_path
 
 
-def test_training_features_filter_and_report(tmp_path, phase1):
+@pytest.mark.parametrize("reason", ["reference_sql_error", "gold_sql_error"])
+def test_training_features_filter_and_report(tmp_path, phase1, reason):
+    exclusions = phase1 / "phase1" / "exclusions.jsonl"
+    exclusions.write_text(exclusions.read_text().replace("reference_sql_error", reason))
     cfg = load_config(write_cfg(tmp_path, **{"data.phase1_dir": str(phase1 / "phase1"),
                                              "data.spider_root": str(phase1 / "spider")}))
     features, report = load_training_features(cfg, FakeTokenizer())
-    # invalid gold dropped; ambiguous ordering only affects scoring, so it still trains; dev/test never used
-    assert (report.candidates, report.dropped_gold_invalid, report.kept) == (3, 1, 2)
+    # invalid reference dropped; ambiguous ordering only affects scoring, so it still trains; dev/test never used
+    assert (report.candidates, report.dropped_reference_invalid, report.kept) == (3, 1, 2)
     assert all(f["labels"][-1] == FakeTokenizer.eos_token_id for f in features)
+
+
+def test_training_diagnostic_reconstructs_rows_then_applies_scoring_exclusions(tmp_path, phase1, monkeypatch):
+    from dataclasses import asdict
+    from types import SimpleNamespace
+
+    import text_to_sql.evaluation.compare_dev as evaluation
+
+    config = write_cfg(tmp_path, **{
+        "data.phase1_dir": str(phase1 / "phase1"), "data.spider_root": str(phase1 / "spider"),
+    })
+    cfg = load_config(config, smoke=True)
+    features, report, trained = prepare_training_data(cfg, FakeTokenizer())
+    assert [r["example_id"] for r in trained] == ["train-00000", "train-00002"]
+    assert len(features) == report.kept == len(trained)
+    adapter = tmp_path / "run" / "final"
+    adapter.mkdir(parents=True)
+    report_path = adapter.parent / "data_report.json"
+    report_path.write_text(json.dumps(asdict(report)))
+    identity = {"config_hash": cfg.semantic_hash(), "model": cfg.model_name, "model_revision": cfg.model_revision}
+    monkeypatch.setattr(evaluation, "export_identity", lambda path: identity)
+    monkeypatch.setitem(sys.modules, "transformers", SimpleNamespace(
+        AutoTokenizer=SimpleNamespace(from_pretrained=lambda path: FakeTokenizer()),
+    ))
+    kwargs = dict(adapter=adapter, training_config=config,
+                  phase1=phase1 / "phase1", spider_root=phase1 / "spider")
+    examples, _exclusions, info = evaluation.select_training_examples(**kwargs)
+    assert [r["example_id"] for r in examples] == ["train-00000"]
+    assert info["n_trained_examples"] == 2
+    assert info["n_training_examples_excluded_from_scoring"] == 1
+    assert info["trained_example_ids"] == [r["example_id"] for r in trained]
+
+    report_path.write_text(json.dumps({**asdict(report), "kept": 999}))
+    with pytest.raises(ValueError, match="data report differs"):
+        evaluation.select_training_examples(**kwargs)
+    identity["config_hash"] = "different run"
+    with pytest.raises(ValueError, match="config hash"):
+        evaluation.select_training_examples(**kwargs)
 
 
 def test_overlength_dropped_not_truncated(tmp_path, phase1):

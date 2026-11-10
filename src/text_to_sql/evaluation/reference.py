@@ -1,15 +1,15 @@
-"""Gold integrity audit and gold-outcome cache.
+"""Reference query validation and execution-result cache.
 
-Gold ordering audit (frozen policy, AUDIT_METHOD below):
+Reference query ordering audit (frozen policy, AUDIT_METHOD below):
 - Top-level ORDER BY (detected by sqlglot in the SQLite dialect) => sequence
   comparison, but only if ties cannot change the returned sequence. The audit
-  re-runs the gold with its ORDER BY keys projected as extra columns and
+  re-runs the reference query with its ORDER BY keys projected as extra columns and
   LIMIT/OFFSET removed, groups adjacent rows with equal keys, and checks every
   tie group that overlaps the returned window: if it holds differing output rows,
   a different tie order would change the answer -> ``ambiguous_order``.
 - Keys that cannot be resolved/projected safely (DISTINCT with non-output keys,
   set operations ordered by non-output terms, non-literal LIMIT, an audit query
-  that disagrees with the gold) -> ``needs_adjudication``: a documented manual
+  that disagrees with the reference result) -> ``needs_adjudication``: a documented manual
   decision frozen before any model score exists.
 - LIMIT/OFFSET without top-level ORDER BY -> ``unordered_limit`` unless removing
   the LIMIT/OFFSET returns the same multiset (the limit cuts nothing).
@@ -37,16 +37,23 @@ from .compare import rows_match
 AUDIT_METHOD = "projected_order_keys+limit_removal/v1"
 
 # Exclusion reasons (data validity only; never used to hide comparator defects)
-GOLD_PARSE_ERROR = "gold_parse_error"
+REFERENCE_PARSE_ERROR = "reference_parse_error"
 AMBIGUOUS_ORDER = "ambiguous_order"
 UNORDERED_LIMIT = "unordered_limit"
 NEEDS_ADJUDICATION = "needs_adjudication"
-GOLD_AUDIT_FAILED = "gold_audit_failed"
+REFERENCE_AUDIT_FAILED = "reference_audit_failed"
 SELF_COMPARE_FAILED = "self_compare_failed"  # comparator defect: investigate, do not exclude
 
 
-def gold_exec_reason(status: str) -> str:
-    return f"gold_{status}"
+def normalize_reference_reason(reason: str | None) -> str | None:
+    """Read exclusion reasons written before the reference terminology rename."""
+    if reason is not None and reason.startswith("gold_"):
+        return "reference_" + reason.removeprefix("gold_")
+    return reason
+
+
+def reference_exec_reason(status: str) -> str:
+    return f"reference_{status}"
 
 
 @dataclass(frozen=True)
@@ -119,8 +126,8 @@ def _resolve_order_keys(tree: exp.Expression) -> list[tuple[str, Any]] | None:
     return keys
 
 
-def audit_order(db_path: str | Path, tree: exp.Expression, gold: ExecOutcome, limits: Limits) -> str | None:
-    """None if the gold sequence is deterministic, else an exclusion reason."""
+def audit_order(db_path: str | Path, tree: exp.Expression, reference: ExecOutcome, limits: Limits) -> str | None:
+    """None if the reference result sequence is deterministic, else an exclusion reason."""
     try:
         offset = _int_literal(tree.args.get("offset")) or 0
         limit = _int_literal(tree.args.get("limit"))
@@ -140,11 +147,11 @@ def audit_order(db_path: str | Path, tree: exp.Expression, gold: ExecOutcome, li
     if full.status != OK:
         return NEEDS_ADJUDICATION
 
-    n = gold.ncols
+    n = reference.ncols
     outputs = [row[:n] for row in full.rows]
     end = len(outputs) if limit is None else offset + limit
-    if outputs[offset:end] != list(gold.rows):
-        return NEEDS_ADJUDICATION  # audit query does not reproduce the gold
+    if outputs[offset:end] != list(reference.rows):
+        return NEEDS_ADJUDICATION  # audit query does not reproduce the reference result
 
     def key_of(row):
         k, extra_i = [], 0
@@ -167,7 +174,7 @@ def audit_order(db_path: str | Path, tree: exp.Expression, gold: ExecOutcome, li
 
 
 @dataclass(frozen=True)
-class GoldRecord:
+class ReferenceRecord:
     eligible: bool
     ordered: bool
     reason: str | None
@@ -181,68 +188,75 @@ class GoldRecord:
         }
 
     @classmethod
-    def from_json(cls, d: dict[str, Any]) -> "GoldRecord":
-        return cls(d["eligible"], d["ordered"], d["reason"], ExecOutcome.from_json(d["outcome"]), d["audit_method"])
+    def from_json(cls, d: dict[str, Any]) -> "ReferenceRecord":
+        return cls(d["eligible"], d["ordered"], normalize_reference_reason(d["reason"]),
+                   ExecOutcome.from_json(d["outcome"]), d["audit_method"])
 
 
-def audit_gold(db_path: str | Path, sql: str, limits: Limits = Limits()) -> GoldRecord:
+def audit_reference(db_path: str | Path, sql: str, limits: Limits = Limits()) -> ReferenceRecord:
     tree, err = parse_single_read(sql)
     if err:
-        return GoldRecord(False, False, GOLD_PARSE_ERROR, ExecOutcome("parse_error", error=err))
+        return ReferenceRecord(False, False, REFERENCE_PARSE_ERROR, ExecOutcome("parse_error", error=err))
     info = order_info(tree)
 
     out = execute_sql(db_path, sql, limits)
     if out.status != OK:
-        return GoldRecord(False, info.ordered, gold_exec_reason(out.status), out)
+        return ReferenceRecord(False, info.ordered, reference_exec_reason(out.status), out)
 
-    # Plumbing check: the comparator must accept gold against itself.
+    # Plumbing check: each reference result must compare equal to itself.
     if not rows_match(out.rows, out.ncols, out.rows, out.ncols, ordered=info.ordered):
-        return GoldRecord(False, info.ordered, SELF_COMPARE_FAILED, out)
+        return ReferenceRecord(False, info.ordered, SELF_COMPARE_FAILED, out)
 
     if info.ordered:
         reason = audit_order(db_path, tree, out, limits)
         if reason:
-            return GoldRecord(False, True, reason, out)
+            return ReferenceRecord(False, True, reason, out)
     elif info.has_limit:
         full = execute_sql(db_path, without_limit(tree), limits)
         if full.status != OK:
-            return GoldRecord(False, False, GOLD_AUDIT_FAILED, out)
+            return ReferenceRecord(False, False, REFERENCE_AUDIT_FAILED, out)
         if not rows_match(full.rows, full.ncols, out.rows, out.ncols, ordered=False):
-            return GoldRecord(False, False, UNORDERED_LIMIT, out)
+            return ReferenceRecord(False, False, UNORDERED_LIMIT, out)
 
-    return GoldRecord(True, info.ordered, None, out)
+    return ReferenceRecord(True, info.ordered, None, out)
 
 
-def gold_cache_key(db_sha256: str, sql: str, limits: Limits) -> str:
+def reference_cache_key(db_sha256: str, sql: str, limits: Limits) -> str:
     ident = [db_sha256, sql, sqlite3.sqlite_version, EVALUATOR_VERSION, AUDIT_METHOD, asdict(limits)]
     return hashlib.sha256(json.dumps(ident, sort_keys=True).encode()).hexdigest()
 
 
-class GoldCache:
-    """Append-only JSONL cache of gold audit records."""
+class ReferenceCache:
+    """Append-only JSONL cache of reference audit records."""
 
     def __init__(self, path: str | Path):
         self.path = Path(path)
-        self._mem: dict[str, GoldRecord] = {}
-        if self.path.exists():
-            for line in self.path.read_text().splitlines():
+        self._mem: dict[str, ReferenceRecord] = {}
+        # Reuse earlier audits on Drive; current records take precedence.
+        paths = [self.path]
+        if self.path.name == "reference_cache.jsonl":
+            paths.insert(0, self.path.with_name("gold_cache.jsonl"))
+        for source in paths:
+            if not source.exists():
+                continue
+            for line in source.read_text().splitlines():
                 if line.strip():
                     d = json.loads(line)
-                    self._mem[d["key"]] = GoldRecord.from_json(d["record"])
+                    self._mem[d["key"]] = ReferenceRecord.from_json(d["record"])
 
-    def get(self, key: str) -> GoldRecord | None:
+    def get(self, key: str) -> ReferenceRecord | None:
         return self._mem.get(key)
 
-    def put(self, key: str, rec: GoldRecord) -> None:
+    def put(self, key: str, rec: ReferenceRecord) -> None:
         self._mem[key] = rec
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a") as f:
             f.write(json.dumps({"key": key, "record": rec.to_json()}) + "\n")
 
-    def get_or_audit(self, db_path: str | Path, db_sha256: str, sql: str, limits: Limits = Limits()) -> GoldRecord:
-        key = gold_cache_key(db_sha256, sql, limits)
+    def get_or_audit(self, db_path: str | Path, db_sha256: str, sql: str, limits: Limits = Limits()) -> ReferenceRecord:
+        key = reference_cache_key(db_sha256, sql, limits)
         rec = self.get(key)
         if rec is None:
-            rec = audit_gold(db_path, sql, limits)
+            rec = audit_reference(db_path, sql, limits)
             self.put(key, rec)
         return rec

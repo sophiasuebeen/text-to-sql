@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import inspect
 import json
 import os
 import shutil
@@ -46,6 +47,7 @@ from ..data.prepare import build_supervised_example, pad_batch
 from ..io import read_jsonl
 from ..data.schema import SERIALIZER_VERSION, serialize_schema
 from ..data.splits import db_path
+from ..evaluation.reference import normalize_reference_reason
 from .prompts import PROMPT_VERSION
 
 # ---------------------------------------------------------------- config
@@ -184,22 +186,24 @@ def run_identity(cfg: TrainConfig, dependency_versions: dict[str, str]) -> dict[
 @dataclass
 class DataReport:
     candidates: int = 0
-    dropped_gold_invalid: int = 0
+    dropped_reference_invalid: int = 0
     dropped_overlength: int = 0
     kept: int = 0
     max_kept_length: int = 0
 
 
-# Gold that cannot be parsed/executed is not valid supervision. Ambiguous ordering
+# Reference SQL that cannot be parsed/executed is not valid supervision. Ambiguous ordering
 # or unordered LIMIT only affect scoring, so those examples still train.
-_INVALID_FOR_TRAINING = ("gold_parse_error", "gold_sql_error", "gold_timeout", "gold_resource_limit",
-                         "gold_unsupported_value", "gold_disallowed", "gold_worker_error")
+_INVALID_FOR_TRAINING = ("reference_parse_error", "reference_sql_error", "reference_timeout", "reference_resource_limit",
+                         "reference_unsupported_value", "reference_disallowed", "reference_worker_error")
 
 
-def load_training_features(cfg: TrainConfig, tokenizer) -> tuple[list[dict[str, list[int]]], DataReport]:
+def prepare_training_data(cfg: TrainConfig, tokenizer) -> tuple[list[dict[str, list[int]]], DataReport, list[dict]]:
+    """Return features, filtering report, and the exact corresponding source rows."""
     phase1 = Path(cfg.phase1_dir)
     rows = [r for r in read_jsonl(phase1 / "examples.jsonl") if r["split"] == "train"]
-    excluded = {x["example_id"]: x["reason"] for x in read_jsonl(phase1 / "exclusions.jsonl")}
+    excluded = {x["example_id"]: normalize_reference_reason(x["reason"])
+                for x in read_jsonl(phase1 / "exclusions.jsonl")}
     rows.sort(key=lambda r: r["example_id"])
     if cfg.max_train_examples is not None:
         # Seeded, so the smoke subset is the same in every session (needed for resume).
@@ -211,9 +215,10 @@ def load_training_features(cfg: TrainConfig, tokenizer) -> tuple[list[dict[str, 
     report = DataReport(candidates=len(rows))
     schemas: dict[str, str] = {}
     features = []
+    kept_rows = []
     for r in rows:
         if excluded.get(r["example_id"]) in _INVALID_FOR_TRAINING:
-            report.dropped_gold_invalid += 1
+            report.dropped_reference_invalid += 1
             continue
         if r["db_id"] not in schemas:
             schemas[r["db_id"]] = serialize_schema(db_path(Path(cfg.spider_root) / "database", r["db_id"]))
@@ -222,8 +227,14 @@ def load_training_features(cfg: TrainConfig, tokenizer) -> tuple[list[dict[str, 
             report.dropped_overlength += 1  # dropped and counted, never truncated
             continue
         features.append(f)
+        kept_rows.append(r)
         report.max_kept_length = max(report.max_kept_length, len(f["input_ids"]))
     report.kept = len(features)
+    return features, report, kept_rows
+
+
+def load_training_features(cfg: TrainConfig, tokenizer) -> tuple[list[dict[str, list[int]]], DataReport]:
+    features, report, _rows = prepare_training_data(cfg, tokenizer)
     return features, report
 
 
@@ -372,13 +383,20 @@ def train(cfg: TrainConfig) -> Path:
                            "refusing to start over silently. Use a new run_name or restore the matching code.")
 
     t = cfg.training
+    # Older Transformers exposes a separate ratio argument; newer versions
+    # accept a fractional ratio directly through warmup_steps.
+    warmup = (
+        {"warmup_ratio": t.warmup_ratio}
+        if "warmup_ratio" in inspect.signature(TrainingArguments).parameters
+        else {"warmup_steps": t.warmup_ratio}
+    )
     args = TrainingArguments(
         output_dir=str(local_out),
         per_device_train_batch_size=t.per_device_train_batch_size,
         gradient_accumulation_steps=t.gradient_accumulation_steps,
         learning_rate=t.learning_rate,
         lr_scheduler_type=t.lr_scheduler_type,
-        warmup_ratio=t.warmup_ratio,
+        **warmup,
         num_train_epochs=t.num_train_epochs,
         max_steps=t.max_steps,
         logging_steps=t.logging_steps,

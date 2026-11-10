@@ -23,7 +23,7 @@ from typing import Any
 
 import sqlglot
 from sqlglot import exp
-from sqlglot.errors import ParseError
+from sqlglot.errors import ParseError, TokenError
 
 _FENCE_RE = re.compile(r"\A```([A-Za-z]*)[ \t]*\n(.*)\n```\Z", re.DOTALL)
 _ALLOWED_FENCE_TAGS = {"", "sql", "sqlite"}
@@ -59,7 +59,7 @@ def parse_single_read(sql: str) -> tuple[exp.Expression | None, str | None]:
     """Parse in the SQLite dialect; require exactly one read (SELECT-family) statement."""
     try:
         trees = [t for t in sqlglot.parse(sql, read="sqlite") if t is not None]
-    except ParseError:
+    except (ParseError, TokenError):
         return None, "parse_error"
     if not trees:
         return None, "empty"

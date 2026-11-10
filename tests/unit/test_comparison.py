@@ -1,4 +1,4 @@
-"""Independently authored comparator fixtures (not gold self-comparison)."""
+"""Independently authored comparator fixtures (not reference self-comparison)."""
 
 import pytest
 
@@ -85,6 +85,6 @@ def test_ordered_requires_sequence():
 
 def test_mixed_types_in_one_column_do_not_crash():
     pred = R((1,), ("1",), (None,), (b"x",))
-    gold = R((None,), (b"x",), ("1",), (1.0,))
-    assert rows_match(pred, 1, gold, 1, ordered=False)
+    reference = R((None,), (b"x",), ("1",), (1.0,))
+    assert rows_match(pred, 1, reference, 1, ordered=False)
     assert not rows_match(pred, 1, R((None,), (b"x",), (1,), (1.0,)), 1, ordered=False)
