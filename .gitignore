@@ -31,3 +31,6 @@ ralph/reviews/
 # Private planning notes (kept locally, not published)
 PLAN.md
 LOOP_PLAN.md
+
+# Local agent instructions
+/AGENTS.md
