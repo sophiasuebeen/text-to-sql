@@ -27,6 +27,8 @@ def test_accepts(raw, sql):
         ("   ", "empty"),
         ("Here is the query: SELECT 1", "parse_error"),
         ("SELECT 1\nThis returns one.", "parse_error"),
+        ("SELECT * FROM people WHERE name = 'Brown", "parse_error"),
+        ('SELECT "unfinished', "parse_error"),
         ("SELECT 1; SELECT 2", "multiple_statements"),
         ("SELECT 1; DROP TABLE t", "multiple_statements"),
         ("DELETE FROM t", "not_read_query"),

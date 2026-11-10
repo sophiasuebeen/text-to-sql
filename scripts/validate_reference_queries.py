@@ -1,6 +1,6 @@
-"""Phase 1: build splits/manifests and run the frozen gold integrity job.
+"""Phase 1: build splits/manifests and validate the reference SQL queries.
 
-    python scripts/gold_integrity.py --config configs/data.yaml [--allow-unpinned]
+    python scripts/validate_reference_queries.py --config configs/data.yaml [--allow-unpinned]
 
 Outputs (in output_dir):
   databases.json         db_id -> path, sha256, bytes
@@ -9,8 +9,8 @@ Outputs (in output_dir):
   exclusions.jsonl       example_id, split, db_id, reason (no questions/SQL)
   integrity_summary.json counts by split and reason, run identity
 
-Exit code 2 if any gold fails self-comparison: that is a comparator defect to
-fix, not a data exclusion.
+Exit code 2 if any reference query result fails comparison with itself.
+This indicates a comparator defect, not an invalid data example.
 """
 
 from __future__ import annotations
@@ -28,14 +28,14 @@ import yaml
 
 from text_to_sql import EVALUATOR_VERSION
 from text_to_sql.data.splits import assign_splits, build_database_manifest, db_path, load_spider_file, select_dev_subset
-from text_to_sql.evaluation.gold import (
+from text_to_sql.evaluation.reference import (
     AUDIT_METHOD,
     NEEDS_ADJUDICATION,
     SELF_COMPARE_FAILED,
-    GoldCache,
-    GoldRecord,
-    audit_gold,
-    gold_cache_key,
+    ReferenceCache,
+    ReferenceRecord,
+    audit_reference,
+    reference_cache_key,
 )
 from text_to_sql.io import write_jsonl
 from text_to_sql.sql.executor import Limits
@@ -76,13 +76,13 @@ def main() -> int:
     (out / "dev_subset.json").write_text(json.dumps(dev_subset, indent=1))
 
     adjudications = yaml.safe_load(Path(cfg["adjudications"]).read_text()) or {}
-    cache = GoldCache(out / "gold_cache.jsonl")
+    cache = ReferenceCache(out / "reference_cache.jsonl")
 
-    keyed = [(e, gold_cache_key(manifest[e.db_id]["sha256"], e.query, limits)) for e in examples]
+    keyed = [(e, reference_cache_key(manifest[e.db_id]["sha256"], e.query, limits)) for e in examples]
     todo = {k: e for e, k in keyed if cache.get(k) is None}
-    print(f"{len(examples)} examples, {len(todo)} gold audits to run", flush=True)
+    print(f"{len(examples)} examples, {len(todo)} reference queries to validate", flush=True)
     with ThreadPoolExecutor(args.workers) as pool:  # each audit spawns its own worker process
-        futures = {k: pool.submit(audit_gold, db_path(root / "database", e.db_id), e.query, limits) for k, e in todo.items()}
+        futures = {k: pool.submit(audit_reference, db_path(root / "database", e.db_id), e.query, limits) for k, e in todo.items()}
         for i, (k, fut) in enumerate(futures.items(), 1):
             cache.put(k, fut.result())
             if i % 500 == 0:
@@ -90,7 +90,7 @@ def main() -> int:
 
     exclusions, counts, defects = [], Counter(), []
     for e, k in keyed:
-        rec: GoldRecord = cache.get(k)
+        rec: ReferenceRecord = cache.get(k)
         eligible, reason = rec.eligible, rec.reason
         if reason == NEEDS_ADJUDICATION and e.example_id in adjudications:
             adj = adjudications[e.example_id]

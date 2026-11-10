@@ -1,13 +1,15 @@
+import json
+
 import pytest
 
-import text_to_sql.evaluation.gold as ev
-from text_to_sql.evaluation.gold import (
+import text_to_sql.evaluation.reference as ev
+from text_to_sql.evaluation.reference import (
     AMBIGUOUS_ORDER,
-    GOLD_PARSE_ERROR,
+    REFERENCE_PARSE_ERROR,
     NEEDS_ADJUDICATION,
     UNORDERED_LIMIT,
-    GoldCache,
-    audit_gold,
+    ReferenceCache,
+    audit_reference,
 )
 from text_to_sql.evaluation.score import score_prediction
 from text_to_sql.io import sha256_file
@@ -39,17 +41,17 @@ from text_to_sql.io import sha256_file
         ("SELECT * FROM people ORDER BY id", True, True, None),
         ("SELECT * FROM people ORDER BY age", False, True, AMBIGUOUS_ORDER),
         ("SELECT DISTINCT name FROM people ORDER BY age", False, True, NEEDS_ADJUDICATION),
-        ("SELECT nope FROM people", False, False, "gold_sql_error"),
-        ("SELEC name", False, False, GOLD_PARSE_ERROR),
+        ("SELECT nope FROM people", False, False, "reference_sql_error"),
+        ("SELEC name", False, False, REFERENCE_PARSE_ERROR),
     ],
 )
-def test_audit_gold(people_db, fast_limits, sql, eligible, ordered, reason):
-    rec = audit_gold(people_db, sql, fast_limits)
+def test_audit_reference(people_db, fast_limits, sql, eligible, ordered, reason):
+    rec = audit_reference(people_db, sql, fast_limits)
     assert (rec.eligible, rec.ordered, rec.reason) == (eligible, ordered, reason)
 
 
 @pytest.mark.parametrize(
-    "gold, pred, correct, status",
+    "reference, pred, correct, status",
     [
         ("SELECT count(*) FROM people", "SELECT count(id) FROM people", True, "ok"),
         ("SELECT name FROM people WHERE age = 30", "SELECT name FROM people WHERE age > 29 AND age < 31", True, "ok"),
@@ -61,38 +63,62 @@ def test_audit_gold(people_db, fast_limits, sql, eligible, ordered, reason):
         ("SELECT name FROM people", "SELECT name FROM people; DELETE FROM people", False, "parse_error"),
     ],
 )
-def test_score_prediction(people_db, fast_limits, gold, pred, correct, status):
-    rec = audit_gold(people_db, gold, fast_limits)
+def test_score_prediction(people_db, fast_limits, reference, pred, correct, status):
+    rec = audit_reference(people_db, reference, fast_limits)
     s = score_prediction(people_db, pred, rec, fast_limits)
     assert (s.correct, s.pred_status) == (correct, status)
 
 
 def test_missing_prediction_counts_as_failure(people_db, fast_limits):
-    rec = audit_gold(people_db, "SELECT 1", fast_limits)
+    rec = audit_reference(people_db, "SELECT 1", fast_limits)
     s = score_prediction(people_db, None, rec, fast_limits)
     assert not s.correct and s.pred_status == "no_sql"
 
 
-def test_ineligible_gold_cannot_be_scored(people_db, fast_limits):
-    rec = audit_gold(people_db, "SELECT name FROM people LIMIT 1", fast_limits)
+def test_ineligible_reference_cannot_be_scored(people_db, fast_limits):
+    rec = audit_reference(people_db, "SELECT name FROM people LIMIT 1", fast_limits)
     with pytest.raises(ValueError):
         score_prediction(people_db, "SELECT 1", rec, fast_limits)
 
 
-def test_gold_cache_hits_and_reloads(people_db, fast_limits, tmp_path, monkeypatch):
+def test_reference_cache_hits_and_reloads(people_db, fast_limits, tmp_path, monkeypatch):
     calls = []
-    real = ev.audit_gold
-    monkeypatch.setattr(ev, "audit_gold", lambda *a, **k: calls.append(1) or real(*a, **k))
-    path = tmp_path / "gold.jsonl"
+    real = ev.audit_reference
+    monkeypatch.setattr(ev, "audit_reference", lambda *a, **k: calls.append(1) or real(*a, **k))
+    path = tmp_path / "reference.jsonl"
     digest = sha256_file(people_db)
 
-    cache = GoldCache(path)
+    cache = ReferenceCache(path)
     r1 = cache.get_or_audit(people_db, digest, "SELECT name FROM people ORDER BY id", fast_limits)
     r2 = cache.get_or_audit(people_db, digest, "SELECT name FROM people ORDER BY id", fast_limits)
     assert len(calls) == 1 and r1 == r2
 
-    r3 = GoldCache(path).get_or_audit(people_db, digest, "SELECT name FROM people ORDER BY id", fast_limits)
+    r3 = ReferenceCache(path).get_or_audit(people_db, digest, "SELECT name FROM people ORDER BY id", fast_limits)
     assert len(calls) == 1 and r3 == r1
     # different db checksum is a different key
     cache.get_or_audit(people_db, "0" * 64, "SELECT name FROM people ORDER BY id", fast_limits)
     assert len(calls) == 2
+
+
+def test_legacy_cache_reused_and_current_cache_takes_precedence(people_db, fast_limits, tmp_path, monkeypatch):
+    sql = "SELECT nope FROM people"
+    key = ev.reference_cache_key(sha256_file(people_db), sql, fast_limits)
+    record = audit_reference(people_db, sql, fast_limits)
+    legacy_record = record.to_json()
+    legacy_record["reason"] = "gold_sql_error"
+    legacy_path = tmp_path / "gold_cache.jsonl"
+    legacy_path.write_text(json.dumps({"key": key, "record": legacy_record}) + "\n")
+    original = legacy_path.read_bytes()
+
+    def unexpected_audit(*args, **kwargs):
+        pytest.fail("the existing audit should be reused")
+
+    monkeypatch.setattr(ev, "audit_reference", unexpected_audit)
+    path = tmp_path / "reference_cache.jsonl"
+    cache = ReferenceCache(path)
+    assert cache.get_or_audit(people_db, sha256_file(people_db), sql, fast_limits) == record
+
+    updated = ev.ReferenceRecord(False, False, "reference_timeout", record.outcome)
+    cache.put(key, updated)
+    assert ReferenceCache(path).get(key) == updated
+    assert legacy_path.read_bytes() == original
