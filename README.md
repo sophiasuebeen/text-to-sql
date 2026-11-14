@@ -13,10 +13,10 @@ Fine-tune Qwen2.5-Coder-1.5B-Instruct to generate SQLite queries from an English
 
 ## Training objective
 
-- Let $x$ be the serialized schema and question, $y=(y_1,\ldots,y_T)$ the reference SQL followed by EOS, and $V$ the model vocabulary. Given the reference prefix $y_{<t}$, Qwen produces a hidden state $h_t$ and vocabulary logits $z_t=W_{\mathrm{head}}h_t$:
+- Let $x$ be the serialized schema and question, $y=(y_1,\ldots,y_T)$ the reference SQL followed by EOS, and $V$ the model vocabulary. Given the reference prefix $y_{\lt t}$, Qwen produces a hidden state $h_t$ and vocabulary logits $z_t=W_{\mathrm{head}}h_t$:
 
 $$
-p_{\theta_0,\phi}(y_t=k\mid x,y_{<t})
+p_{\theta_0,\phi}(y_t=k\mid x,y_{\lt t})
 =\frac{\exp(z_{t,k})}{\sum_{j\in V}\exp(z_{t,j})}.
 $$
 
@@ -25,7 +25,7 @@ $$
 $$
 \min_{\phi}\;\mathcal{L}(\phi)
 =-\frac{1}{N}\sum_i\sum_{t=1}^{T_i}
-\log p_{\theta_0,\phi}(y_{i,t}\mid x_i,y_{i,<t}),
+\log p_{\theta_0,\phi}(y_{i,t}\mid x_i,y_{i,\lt t}),
 \qquad
 N=\sum_i T_i
 $$
@@ -40,7 +40,7 @@ $$
 For each targeted linear transformation, with biases omitted:
 
 $$
-u=\widehat W_0 a+\frac{\alpha}{r}B\,A\,\operatorname{Dropout}(a),
+u=\widehat W_0 a+\frac{\alpha}{r}B\,A\,\mathrm{Dropout}(a),
 \qquad
 A\in\mathbb{R}^{r\times d_{\mathrm{in}}},\quad
 B\in\mathbb{R}^{d_{\mathrm{out}}\times r}.
@@ -98,9 +98,9 @@ main() → load_config() → train()
 The primary metric is question-weighted **execution accuracy**:
 
 $$
-\operatorname{EX}=\frac{1}{M}\sum_{i=1}^{M}
-\mathbf{1}\!\left[\operatorname{Exec}(\widehat q_i,D_i)
-\equiv\operatorname{Exec}(q_i,D_i)\right].
+\mathrm{EX}=\frac{1}{M}\sum_{i=1}^{M}
+\mathbf{1}\left[\mathrm{Exec}(\widehat q_i,D_i)
+\equiv\mathrm{Exec}(q_i,D_i)\right].
 $$
 
 | Smoke evaluation | Eligible questions / DBs | Baseline | Adapter | Change |
