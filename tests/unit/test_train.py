@@ -70,6 +70,34 @@ def test_train_module_does_not_import_ml_libraries():
     assert not {"torch", "transformers", "peft", "bitsandbytes"} & set(sys.modules)
 
 
+@pytest.mark.parametrize("step,max_steps,elapsed,pauses", [
+    (5, 20, 59, False), (5, 20, 60, True), (20, 20, 61, False),
+])
+def test_session_budget_requests_checkpoint_before_stopping(tmp_path, monkeypatch, step, max_steps, elapsed, pauses):
+    from types import SimpleNamespace
+
+    import text_to_sql.model.train as module
+
+    monkeypatch.setitem(sys.modules, "transformers", SimpleNamespace(TrainerCallback=object))
+    monkeypatch.setattr(module.time, "monotonic", lambda: 100 + elapsed)
+    budget = module.SessionBudget(60, started=100)
+    cfg = load_config(write_cfg(tmp_path))
+    status_callback = module._make_callbacks(cfg, {}, tmp_path / "run", FakeTokenizer(), budget=budget)[-1]
+    control = SimpleNamespace(should_save=False, should_training_stop=False)
+    state = SimpleNamespace(global_step=step, max_steps=max_steps)
+    result = status_callback.on_step_end(None, state, control)
+    assert result is control
+    assert (budget.paused, control.should_save, control.should_training_stop) == (pauses, pauses, pauses)
+
+
+@pytest.mark.parametrize("seconds", [-1, 0, float("nan"), float("inf")])
+def test_invalid_session_budget_rejected_before_gpu_import(tmp_path, seconds):
+    from text_to_sql.model.train import train
+
+    with pytest.raises(ValueError, match="positive finite"):
+        train(load_config(write_cfg(tmp_path)), max_session_seconds=seconds)
+
+
 @pytest.fixture
 def phase1(tmp_path, people_db):
     db_dir = tmp_path / "spider" / "database" / "people"

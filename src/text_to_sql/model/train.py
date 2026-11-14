@@ -307,7 +307,21 @@ def build_model_and_tokenizer(cfg: TrainConfig):
     return model, tokenizer, compute_dtype
 
 
-def _make_callbacks(cfg: TrainConfig, identity: dict[str, Any], run_root: Path, tokenizer):
+@dataclass
+class SessionBudget:
+    seconds: float
+    started: float = field(default_factory=time.monotonic)
+    paused: bool = False
+
+    def __post_init__(self) -> None:
+        import math
+
+        if not math.isfinite(self.seconds) or self.seconds <= 0:
+            raise ValueError("session budget must be a positive finite number of seconds")
+
+
+def _make_callbacks(cfg: TrainConfig, identity: dict[str, Any], run_root: Path, tokenizer,
+                    budget: SessionBudget | None = None):
     from transformers import TrainerCallback
 
     status_path = run_root / "status.json"
@@ -336,6 +350,15 @@ def _make_callbacks(cfg: TrainConfig, identity: dict[str, Any], run_root: Path, 
             write_status(status_path, run=cfg.run_name, state="training", step=state.global_step)
 
     class StatusCallback(TrainerCallback):
+        def on_step_end(self, args, state, control, **kw):
+            if (budget is not None and state.global_step < state.max_steps
+                    and time.monotonic() - budget.started >= budget.seconds):
+                # Trainer saves full optimizer/scheduler/RNG state before stopping.
+                budget.paused = True
+                control.should_save = True
+                control.should_training_stop = True
+            return control
+
         def on_log(self, args, state, control, logs=None, **kw):
             loss = (logs or {}).get("loss")
             if loss is not None and loss != loss:  # NaN
@@ -348,7 +371,8 @@ def _make_callbacks(cfg: TrainConfig, identity: dict[str, Any], run_root: Path, 
     return [DriveCheckpointCallback(), StatusCallback()]
 
 
-def train(cfg: TrainConfig) -> Path:
+def train(cfg: TrainConfig, *, max_session_seconds: float | None = None) -> Path:
+    budget = SessionBudget(max_session_seconds) if max_session_seconds is not None else None
     import torch
     from transformers import Trainer, TrainingArguments, set_seed
 
@@ -367,7 +391,6 @@ def train(cfg: TrainConfig) -> Path:
         raise RuntimeError("no training examples left after filtering")
 
     pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id
-
     def collate(batch):
         return {k: torch.tensor(v) for k, v in pad_batch(batch, pad_id).items()}
 
@@ -418,12 +441,25 @@ def train(cfg: TrainConfig) -> Path:
         args=args,
         train_dataset=features,
         data_collator=collate,
-        callbacks=_make_callbacks(cfg, identity, run_root, tokenizer),
+        callbacks=_make_callbacks(cfg, identity, run_root, tokenizer, budget=budget),
     )
 
     started = time.time()
     torch.cuda.reset_peak_memory_stats()
     trainer.train(resume_from_checkpoint=str(resume_local) if resume_local else None)
+
+    if budget is not None and budget.paused:
+        checkpoint = latest_complete_checkpoint(run_root / "resume", identity)
+        if checkpoint is None or checkpoint.name != f"checkpoint-{trainer.state.global_step}":
+            raise RuntimeError("session budget reached, but the current checkpoint is not verified on Drive")
+        write_status(
+            run_root / "status.json", run=cfg.run_name, state="paused", step=trainer.state.global_step,
+            reason="session_time_budget", checkpoint=str(checkpoint),
+            peak_gpu_mem_gib=round(torch.cuda.max_memory_allocated() / 2**30, 2),
+            session_seconds=round(time.monotonic() - budget.started),
+        )
+        print(f"session budget reached; resume the same configuration from {checkpoint}")
+        return run_root
 
     final = local_out / "final"
     trainer.model.save_pretrained(final)
@@ -447,10 +483,13 @@ def main() -> None:
     ap.add_argument("--config", default="configs/train.yaml")
     ap.add_argument("--smoke", action="store_true", help="short run on a seeded ~200-example subset")
     ap.add_argument("--allow-unpinned", action="store_true", help="debug only: unpinned model revision")
+    ap.add_argument("--session-hours", type=float,
+                    help="save a resumable checkpoint and pause after this invocation's time budget")
     args = ap.parse_args()
     cfg = load_config(args.config, smoke=args.smoke, allow_unpinned=args.allow_unpinned)
     print(f"run {cfg.run_name}: config hash {cfg.semantic_hash()}")
-    print(f"done: {train(cfg)}")
+    seconds = args.session_hours * 3600 if args.session_hours is not None else None
+    print(f"run artifacts: {train(cfg, max_session_seconds=seconds)}")
 
 
 if __name__ == "__main__":
