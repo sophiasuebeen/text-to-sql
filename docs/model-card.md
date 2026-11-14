@@ -1,6 +1,6 @@
 # Model card
 
-> Status: **smoke training completed; full training and final test pending.**
+> Status: **smoke and first full-data training completed; full-data dev evaluation and final test pending.**
 > See [experiment log](experiments.md) for settings, preliminary comparisons,
 > failures, and artifact locations.
 
@@ -17,19 +17,23 @@ smoke run's actual revision is preserved in its exported `identity.json` on Driv
 | Quantization | 4-bit NF4, double quantization; fp16 compute on T4, bf16 where supported |
 | LoRA | r=16, alpha=32, dropout 0.05, on `q_proj, k_proj, v_proj, o_proj` |
 | Optimizer | paged AdamW 8-bit, learning rate 2e-4, cosine schedule, 3% warmup |
-| Batch | 4 per device × 4 accumulation = effective 16 (fixed; lower per-device batch on OOM) |
-| Epochs | up to 3, gradient checkpointing, fixed seed |
+| Batch | Recorded T4 runs: 2 per device × 8 accumulation = effective 16 |
+| Epochs | Smoke: 3; first full-data run: 1; gradient checkpointing, fixed seed |
 | Loss | only SQL tokens and EOS are supervised; prompt tokens are masked |
 
 ## Checkpoints
 
-Saved every 100 optimizer steps and at each epoch boundary. Each checkpoint is
-checksummed, copied to Google Drive, verified, and only then marked complete.
+The template saves every 100 optimizer steps. The recorded full-data run began
+with a 25-step interval and later used an explicit 20-step runtime override;
+epoch boundaries and session-budget pauses also request saving. Each checkpoint
+is checksummed, copied to Google Drive, verified, and only then marked complete.
 Resume uses the newest complete checkpoint with a matching run identity (config
 hash, model revision, code commit, dependency versions). The newest two resume
 checkpoints are kept; epoch-end adapter exports are never pruned.
 
-The best checkpoint is chosen by dev execution accuracy, not by loss.
+Checkpoint selection is planned to use dev execution accuracy, not loss. The
+one-epoch full-data run has completed, but no dev-based selection or full-data
+accuracy result is reported yet.
 
 ## Intended use
 
@@ -37,6 +41,10 @@ A learning and portfolio project: SQLite text-to-SQL over schemas that fit in
 the context window. Not evaluated on other SQL dialects or arbitrary schemas.
 
 ## Results
+
+The full-data run completed 377 optimizer steps on 6,031 retained training
+examples on November 14, 2026. Its final export is marked complete. This confirms
+training/export completion, not improved accuracy; dev evaluation is pending.
 
 Preliminary smoke model (195 training examples, 3 epochs):
 

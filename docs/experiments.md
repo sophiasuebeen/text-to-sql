@@ -148,3 +148,86 @@ the same validation policy. Before running it, preserve the actual Colab configu
 and environment versions locally, account for the remaining compute budget, and
 finalize data-validity decisions. Improved accuracy from full-data training remains
 an untested hypothesis. Keep the test evaluation for the final selected setup.
+
+## 2026-11-10 — First full-data run (launch record)
+
+Run: `qlora-r16-lr2e-4-full-e1`, configured in
+`configs/train-full-t4-e1.yaml` (the local template now uses a 20-step saving
+interval; the saved launch configuration used 25). Started at 14:48:50 UTC (23:48:50 KST) on the
+existing T4 runtime. This is a fresh adapter initialized from the pinned base
+model, not continued training of the smoke adapter.
+
+- Full training preflight: 6,116 candidates; 3 invalid references and 82
+  overlength examples dropped; **6,031 retained**, longest sequence 1,887 tokens.
+- Target: **one epoch**, approximately 377 optimizer steps. Keep the established
+  2e-4 learning rate, LoRA settings, 2,048-token context, and effective batch 16
+  (microbatch 2 × accumulation 8).
+- Base-model revision: `2e1fd397ee46e1388853d2af2c993145b0f1098a`, matching the
+  smoke export. Baseline/validation settings remain unchanged.
+- Extrapolating the smoke run gives about **5.66 hours per epoch** or roughly
+  17 hours for three epochs. This is a rough estimate, not a measured full-run
+  duration. The existing runtime was already 2.96 hours old at launch.
+- Compute plan: reduce the initial target to one epoch and run this invocation
+  with `--session-hours 2`, preserving the existing six-hour session ceiling and
+  twelve-hour experiment ceiling. Reassess measured speed and remaining compute
+  before another invocation; reserve time for validation and final evaluation.
+- At the session deadline, finish the current optimizer step, request a full
+  checkpoint, verify its Drive copy, and report `state=paused`. A paused run does
+  not export or claim a completed final model. The next invocation with the same
+  configuration resumes its optimizer, scheduler, RNG, and data position. Saving
+  and finishing the current step can extend the invocation beyond two hours.
+- Save regular checkpoints every 25 steps and log every 5 steps. Run detached
+  from the local terminal, writing `training.log` directly to Drive. Checkpoint
+  copies survive a VM disconnect; the local terminal need not remain connected.
+
+The run directory on Drive contains the actual configuration, a training-source
+snapshot, launch metadata, and a preflight per-example supervised-feature hash
+manifest. This preflight snapshot is separate from the original smoke run's
+reconstruction. No final accuracy result is available for the full-data run yet.
+
+Observed environment at launch: PyTorch `2.14.1+cu130`, Transformers `5.22.1`,
+PEFT `0.21.2`, bitsandbytes `0.50.2`, Accelerate `1.15.0`.
+
+Artifacts:
+`/content/drive/MyDrive/text-to-sql/runs/qlora-r16-lr2e-4-full-e1/`.
+
+Local verification for the session-budget change: **160 tests passed**. The
+deadline callback requests saving and stopping only for incomplete training;
+finished training retains the normal completion path. Actual budget-triggered
+checkpoint/resume behavior in this GPU run remains to be observed.
+
+
+## 2026-11-14 — Full-data training completed
+
+The same `qlora-r16-lr2e-4-full-e1` run completed **377/377 optimizer steps** and
+one epoch on **6,031 retained examples**. The final status reported `complete`
+at `2026-11-14T13:56:13+00:00` (22:56:13 KST), with process exit code 0.
+A subsequent read confirmed `final/COMPLETE.json` and resume completion markers
+for checkpoints 360 and 377. The export pipeline verifies checksums before
+publishing the completion marker; a fresh-runtime inference check remains pending.
+
+Operational changes and observations:
+
+- Original interrupted attempts left checkpoints at 25, 50, and later steps;
+  25/50 were saving intervals, not training step limits. The backend termination
+  cause was not established. Keeping an actual training cell executing did not
+  guarantee session survival.
+- After repeated interruptions, saving was changed from 25 to **20 optimizer
+  steps** through a callback that sets both Trainer arguments and restored state.
+  The saved training configuration and identity were preserved. Periodic saves
+  follow global-step multiples; epoch-end and budget saves are additional.
+- A supervised invocation resumed from checkpoint-220 and paused normally at
+  **checkpoint-360** on its two-hour budget. It reported `state=paused`,
+  `reason=session_time_budget`, exit code 0, and `session_seconds=7224`.
+- The final invocation resumed checkpoint-360 with a one-hour budget and completed
+  at 377. It reported `session_seconds=907` and peak allocated GPU memory of
+  **8.90 GiB for that invocation**. These timings are not the total training cost.
+- CUDA allocation warnings were followed by progress in multiple attempts. The
+  logs do not establish that those warnings caused VM losses.
+
+The first full-data adapter has **not been evaluated on dev or final test**.
+Smoke scores above do not describe this adapter. Unresolved reference-validity
+adjudications and total compute accounting remain outstanding before official
+scoring and further experiment allocation. Total GPU time must include failed
+attempts, initialization, evaluation, and interrupted sessions; it is not inferred
+from the last invocation's runtime.
