@@ -1,0 +1,3 @@
+interface:
+  display_name: "Text-to-SQL Colab"
+  short_description: "Resume and inspect this project Colab training"
