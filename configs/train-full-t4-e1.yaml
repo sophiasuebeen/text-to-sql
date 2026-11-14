@@ -1,0 +1,38 @@
+# First full-data run: one epoch, effective batch 16.
+# Run without --smoke; use --session-hours 2 to checkpoint and pause.
+run_name: qlora-r16-lr2e-4-full-e1
+seed: 42
+model:
+  name: Qwen/Qwen2.5-Coder-1.5B-Instruct
+  revision: 2e1fd397ee46e1388853d2af2c993145b0f1098a
+data:
+  phase1_dir: /content/drive/MyDrive/text-to-sql/artifacts/phase1
+  spider_root: /content/drive/MyDrive/text-to-sql/data/spider
+  max_train_examples: null
+context:
+  max_length: 2048
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules:
+  - q_proj
+  - k_proj
+  - v_proj
+  - o_proj
+training:
+  learning_rate: 0.0002
+  lr_scheduler_type: cosine
+  warmup_ratio: 0.03
+  per_device_train_batch_size: 2
+  gradient_accumulation_steps: 8
+  num_train_epochs: 1
+  max_steps: -1
+  gradient_checkpointing: true
+  optim: paged_adamw_8bit
+  logging_steps: 5
+  save_steps: 20
+  keep_resume_checkpoints: 2
+output:
+  local_dir: /content/runs
+  drive_dir: /content/drive/MyDrive/text-to-sql/runs

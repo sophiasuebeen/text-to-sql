@@ -147,3 +147,42 @@ and after scoring exclusions. Generation overflows stay in the scoring denominat
 This is a training memorization diagnostic, not dev/test generalization accuracy.
 Do not pass `--max-examples` in this mode. Results use the same paired predictions
 format and support `--resume`; the dev evaluation remains unchanged.
+
+## Full-data training with a session budget
+
+From the Mac, for an unfinished recorded run with Drive already mounted:
+
+```bash
+python scripts/colab_training.py resume --session sql-resume --skip-mount --session-hours 2
+```
+
+The controller restores the saved source/configuration, verifies identity and
+checksums, and applies a 20-step saving policy without changing the historical
+configuration hash. Do not resume the recorded run by substituting a modified
+local configuration: its hash can differ from the saved checkpoint.
+
+At the budget, the invocation finishes an optimizer step, verifies its full
+checkpoint on Drive, and records `paused`. A finished target with a published
+final export records `complete`. Pausing does not release the VM. The recorded
+one-epoch run is now complete; resuming it is unnecessary and the controller
+skips runs with an existing final export. See the [automation guide](colab-automation.md)
+and [experiment log](experiments.md) for current operational details and budgets.
+
+## Evaluate the completed full-data adapter
+
+On the Colab GPU, from the installed project with Drive mounted:
+
+```bash
+python -u -m text_to_sql.evaluation.compare_dev \
+  --adapter /content/drive/MyDrive/text-to-sql/runs/qlora-r16-lr2e-4-full-e1/final \
+  --data-config configs/data.yaml \
+  --output /content/drive/MyDrive/text-to-sql/artifacts/full-e1-dev
+```
+
+This is the existing provisional diagnostic over the **fixed dev subset**.
+Omitting `--max-examples` does not select all dev examples: `dev_subset.json`
+still controls selection. Use a new output directory initially, or the same
+identity-compatible directory with `--resume` after an interruption. This command
+has not been run for the completed adapter. Finalizing unresolved data-validity
+decisions, full-dev reporting, and the final held-out test remain separate steps;
+the current CLI does not expose full-dev or test selection.
